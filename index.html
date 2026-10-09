@@ -107,6 +107,8 @@ a{color:var(--lit)}
 .alts button{border:1px solid var(--line);background:none;border-radius:5px;padding:2px 8px;font-size:12px;cursor:pointer}
 .alts button:hover{border-color:var(--lit);color:var(--lit)}
 .more{background:none;border:none;color:var(--muted);font-size:12.5px;cursor:pointer;padding:4px 0;text-align:left}
+.slot-h{flex-wrap:wrap}
+.more[data-double]{color:var(--lit);font-weight:600;border:1px solid var(--lit);border-radius:999px;padding:1px 9px}
 .empty{padding:18px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);font-size:14px;background:var(--surface)}
 
 /* history */
@@ -315,6 +317,14 @@ const S={readings:new Map(), rEdit:null, date:null,team:'성부', fam:'mix', max
 const $=id=>document.getElementById(id);
 function pref(k,v){try{if(v===undefined)return JSON.parse(localStorage.getItem('sg:'+k));localStorage.setItem('sg:'+k,JSON.stringify(v))}catch(e){return null}}
 ['team','fam','maxDiff','recent'].forEach(k=>{const v=pref(k);if(v!==null&&v!==undefined)S[k]=v});
+const DOUBLE_OK=['봉헌','성체'];
+S.chosen={};
+S.double=Object.assign({봉헌:false,성체:false},pref('double')||{});
+// 기록 한 칸에 "146 꽃 / 117 그 사랑…"처럼 두 곡까지 담아요
+function weekNums(w,sl){const p=w&&w.picks&&w.picks[sl];if(!p||!p.num)return [];const out=[Number(p.num)];
+  String(p.title||'').split(' / ').slice(1).forEach(part=>{const m=part.match(/^(\d+)\s/);if(m)out.push(Number(m[1]))});return out}
+function encodePick(nums){const t=n=>(S.songs.get(n)||{}).title||'';const ns=nums.filter(n=>n&&S.songs.has(n));if(!ns.length)return null;
+  return {num:ns[0],title:[t(ns[0])].concat(ns.slice(1).map(n=>n+' '+t(n))).join(' / ')}}
 
 function nextSunday(){const n=new Date();const t=D(n.getFullYear(),n.getMonth()+1,n.getDate());return add(t,(7-dow(t))%7)}
 S.date=nextSunday();
@@ -322,7 +332,7 @@ S.date=nextSunday();
 /* ---------- 추천 점수 ---------- */
 function rng(seed){let s=seed>>>0||1;return()=>{s^=s<<13;s>>>=0;s^=s>>17;s^=s<<5;s>>>=0;return s/4294967296}}
 function effDiff(song){const a=(song.adj&&song.adj[S.team])||0;return Math.max(1,Math.min(5,(song.diff||3)-a))}
-function lastSung(num,before){let best=null;for(const w of S.weeks.values()){if(before&&w.date>=before)continue;for(const sl of SLOTS){if(w.picks&&w.picks[sl]&&w.picks[sl].num===num){if(!best||w.date>best)best=w.date}}}return best}
+function lastSung(num,before){let best=null;for(const w of S.weeks.values()){if(before&&w.date>=before)continue;for(const sl of SLOTS){if(weekNums(w,sl).includes(num)){if(!best||w.date>best)best=w.date}}}return best}
 
 function scoreSong(song,slot,L,rand){
   if(!(song.slots||[]).includes(slot))return null;
@@ -353,10 +363,10 @@ function recommend(){
   const L=liturgy(S.date); const rand=rng(S.seed*7919+S.date.getTime()/DAY);
   const lists={};
   for(const sl of SLOTS){const arr=[];for(const song of S.songs.values()){const r=scoreSong(song,sl,L,rand);if(r)arr.push(r)}arr.sort((a,b)=>b.score-a.score);lists[sl]=arr}
-  const used=new Set(); const picks={};
-  for(const sl of SLOTS){const o=S.overrides[sl];if(o&&S.songs.has(o)){picks[sl]=o;used.add(o)}}
-  const order=[...SLOTS].filter(sl=>!picks[sl]).sort((a,b)=>lists[a].length-lists[b].length);
-  for(const sl of order){const c=lists[sl].find(x=>!used.has(x.song.num));if(c){picks[sl]=c.song.num;used.add(c.song.num)}}
+  const used=new Set(); const picks={}; const need=sl=>DOUBLE_OK.includes(sl)&&S.double[sl]?2:1;
+  for(const sl of SLOTS){picks[sl]=[];(S.overrides[sl]||[]).forEach((n,i)=>{if(n&&i<need(sl)&&S.songs.has(n)&&!used.has(n)){picks[sl][i]=n;used.add(n)}})}
+  const order=[...SLOTS].sort((a,b)=>lists[a].length-lists[b].length);
+  for(const i of [0,1])for(const sl of order){if(i>=need(sl)||picks[sl][i])continue;const c=lists[sl].find(x=>!used.has(x.song.num));if(c){picks[sl][i]=c.song.num;used.add(c.song.num)}}
   S.picks=picks; return {lists,L};
 }
 
@@ -407,17 +417,21 @@ function renderRec(){
   const {lists,L}=recommend();
   const saved=S.weeks.get(iso(S.date));
   $('recStatus').textContent=saved?`이 주일은 이미 확정된 기록이 있어요 (부른 기록 탭). 다시 확정하면 덮어써요.`:'';
+  const allPicked=new Set(Object.values(S.picks).flat());
   host.innerHTML=SLOTS.map(sl=>{
-    const list=lists[sl]; const pickNum=S.picks[sl]; const pick=list.find(x=>x.song.num===pickNum);
-    const pinned=S.overrides[sl]===pickNum;
-    const pickSong=S.songs.get(pickNum);
-    const alts=list.filter(x=>x.song.num!==pickNum&&!Object.values(S.picks).includes(x.song.num));
+    const list=lists[sl]; const nums=S.picks[sl]||[]; const dbl=DOUBLE_OK.includes(sl)&&S.double[sl];
+    const ov=S.overrides[sl]||[]; const pinnedAny=ov.some(Boolean);
+    const blocks=(dbl?[0,1]:[0]).map(i=>{const n=nums[i];const so=S.songs.get(n);const pick=list.find(x=>x.song.num===n);
+      if(!so)return `<div class="empty">${i?'두 번째로 넣을 후보가 없어요.':'조건에 맞는 곡이 없어요. 난이도 상한을 올리거나 최근 곡 빼기를 줄여 보세요.'}</div>`;
+      return `<div class="pick"><div class="no">${so.num}</div><div style="min-width:0"><div class="t">${esc(so.title)}</div>
+        <div class="why">${dbl?`<span>${i?'두 번째 곡':'첫 번째 곡'}</span>`:''}${ov[i]===n&&S.chosen[sl+i]?'<span>직접 고른 곡</span>':''}${pick?whyHtml(pick.why):'<span class="warn">지금 조건에는 맞지 않는 곡</span>'}</div></div></div>`}).join('');
+    const alts=list.filter(x=>!allPicked.has(x.song.num));
     const show=S.expanded[sl]?alts.slice(0,15):alts.slice(0,4);
-    const top=pickSong?`<div class="pick"><div class="no">${pickSong.num}</div><div style="min-width:0"><div class="t">${esc(pickSong.title)}</div>
-      <div class="why">${pinned?'<span>직접 고른 곡</span>':''}${pick?whyHtml(pick.why):'<span class="warn">지금 조건에는 맞지 않는 곡</span>'}</div></div></div>`
-      :`<div class="empty">조건에 맞는 곡이 없어요. 난이도 상한을 올리거나 최근 곡 빼기를 줄여 보세요.</div>`;
-    return `<article class="slot"><div class="slot-h"><h3>${sl} 성가</h3><span class="count">후보 ${list.length}곡${pinned?` · <button class="more" data-unpin="${sl}">자동 추천으로 되돌리기</button>`:''}</span></div>${top}
-      ${show.length?`<ul class="alts">${show.map(x=>`<li><span class="no">${x.song.num}</span><span class="t" title="${esc(x.song.title)}">${esc(x.song.title)}</span><span class="sc">익숙 ${x.song.fam} · 난도 ${effDiff(x.song)}</span><button data-slot="${sl}" data-num="${x.song.num}">이 곡으로</button></li>`).join('')}</ul>`:''}
+    const btns=x=>dbl?`<button data-slot="${sl}" data-idx="0" data-num="${x.song.num}" aria-label="첫 번째 곡으로">첫 곡</button><button data-slot="${sl}" data-idx="1" data-num="${x.song.num}" aria-label="두 번째 곡으로">둘째 곡</button>`
+      :`<button data-slot="${sl}" data-idx="0" data-num="${x.song.num}">이 곡으로</button>`;
+    const tog=DOUBLE_OK.includes(sl)?` · <button class="more" data-double="${sl}">${dbl?'한 곡만':'+ 한 곡 더'}</button>`:'';
+    return `<article class="slot"><div class="slot-h"><h3>${sl} 성가</h3><span class="count">후보 ${list.length}곡${tog}${pinnedAny?` · <button class="more" data-unpin="${sl}">자동 추천으로 되돌리기</button>`:''}</span></div>${blocks}
+      ${show.length?`<ul class="alts">${show.map(x=>`<li><span class="no">${x.song.num}</span><span class="t" title="${esc(x.song.title)}">${esc(x.song.title)}</span><span class="sc">익숙 ${x.song.fam} · 난도 ${effDiff(x.song)}</span>${btns(x)}</li>`).join('')}</ul>`:''}
       ${alts.length>4?`<button class="more" data-expand="${sl}">${S.expanded[sl]?'접기':`다른 후보 더 보기 (${Math.min(alts.length,15)-4}곡)`}</button>`:''}</article>`}).join('');
 }
 
@@ -476,7 +490,7 @@ $('readings').addEventListener('submit',async e=>{e.preventDefault();
   st.textContent='저장하는 중…';
   try{await S.db.collection('readings').doc(key).set(doc);S.rEdit=null;renderReadings()}catch(err){st.textContent=writeErr(err)}
 });
-function setDate(dt){S.rEdit=null;S.date=dt;S.overrides={};S.expanded={};renderAll()}
+function setDate(dt){S.rEdit=null;S.date=dt;S.overrides={};S.chosen={};S.expanded={};renderAll()}
 $('date').addEventListener('change',e=>{if(e.target.value)setDate(parseISO(e.target.value))});
 $('prevWeek').onclick=()=>setDate(add(S.date,-7));
 $('nextWeek').onclick=()=>setDate(add(S.date,7));
@@ -486,11 +500,13 @@ $('famSeg').onclick=e=>{const v=e.target.dataset.v;if(v){S.fam=v;pref('fam',v);r
 $('maxDiff').onchange=e=>{S.maxDiff=+e.target.value;pref('maxDiff',S.maxDiff);renderRec()};
 $('recentWeeks').onchange=e=>{S.recent=+e.target.value;pref('recent',S.recent);renderRec()};
 let kwT;$('kw').oninput=e=>{clearTimeout(kwT);kwT=setTimeout(()=>{S.kw=e.target.value;renderRec()},250)};
-$('reroll').onclick=()=>{S.seed++;S.overrides={};renderRec()};
+$('reroll').onclick=()=>{S.seed++;S.overrides={};S.chosen={};renderRec()};
 $('slots').onclick=e=>{const b=e.target.closest('button');if(!b)return;
-  if(b.dataset.slot){S.overrides[b.dataset.slot]=+b.dataset.num;renderRec()}
+  if(b.dataset.slot){const sl=b.dataset.slot,i=+(b.dataset.idx||0);const o=(S.overrides[sl]||[]).slice();
+    (S.picks[sl]||[]).forEach((n,k)=>{if(o[k]===undefined)o[k]=n});o[i]=+b.dataset.num;S.overrides[sl]=o;S.chosen[sl+i]=true;renderRec()}
+  else if(b.dataset.double){const sl=b.dataset.double;S.double[sl]=!S.double[sl];pref('double',S.double);if(!S.double[sl]&&S.overrides[sl])S.overrides[sl]=S.overrides[sl].slice(0,1);renderRec()}
   else if(b.dataset.expand){S.expanded[b.dataset.expand]=!S.expanded[b.dataset.expand];renderRec()}
-  else if(b.dataset.unpin){delete S.overrides[b.dataset.unpin];renderRec()}};
+  else if(b.dataset.unpin){delete S.overrides[b.dataset.unpin];S.chosen[b.dataset.unpin+0]=S.chosen[b.dataset.unpin+1]=false;renderRec()}};
 
 function showTab(t){['rec','hist','songs'].forEach(x=>{$('tab-'+x).setAttribute('aria-selected',x===t);$('pane-'+x).hidden=x!==t});pref('tab',t)}
 ['rec','hist','songs'].forEach(x=>$('tab-'+x).onclick=()=>showTab(x));
@@ -499,7 +515,7 @@ function showTab(t){['rec','hist','songs'].forEach(x=>{$('tab-'+x).setAttribute(
 $('confirm').onclick=async()=>{
   if(!S.db){$('recStatus').textContent='저장소에 연결되지 않아 저장할 수 없어요.';return}
   const L=liturgy(S.date); const picks={};
-  for(const sl of SLOTS){const n=S.picks[sl];if(n&&S.songs.has(n))picks[sl]={num:n,title:S.songs.get(n).title}}
+  for(const sl of SLOTS){const e=encodePick(S.picks[sl]||[]);if(e)picks[sl]=e}
   const btn=$('confirm');btn.disabled=true;$('recStatus').textContent='저장하는 중…';
   try{await S.db.collection('weeks').doc(iso(S.date)).set({date:iso(S.date),label:L.name,cycle:L.cycle,season:L.season,team:S.team,picks,savedAt:new Date().toISOString()});
     $('recStatus').textContent=`${L.name} 성가를 확정했어요.`;}
@@ -509,8 +525,8 @@ $('confirm').onclick=async()=>{
 function writeErr(err){if(err&&err.code==='key')return '편집 암호를 먼저 넣어 주세요. 위쪽 칸에 넣고 다시 눌러 주세요.';if(err&&err.code==='net')return '구글 시트에 연결하지 못했어요. 인터넷 연결을 확인하고 다시 눌러 주세요.';if(err&&err.code==='invalid_argument'){S.canWrite=false;return '이 링크는 보기 전용이라 저장할 수 없어요.'}if(err&&err.code==='quota_exceeded')return '저장 공간이 가득 찼어요. 오래된 기록을 지워 주세요.';return '저장하지 못했어요. 잠시 후 다시 눌러 주세요.'}
 
 $('hist').onclick=async e=>{const b=e.target.closest('button');if(!b)return;
-  if(b.dataset.share){const w=S.weeks.get(b.dataset.share);if(w){const picks={};for(const sl of SLOTS)if(w.picks&&w.picks[sl])picks[sl]=w.picks[sl].num;shareSongs(parseISO(w.date),picks,w.team,b)}return}
-  if(b.dataset.open){showTab('rec');S.date=parseISO(b.dataset.open);const w=S.weeks.get(b.dataset.open);S.overrides={};if(w&&w.picks)for(const sl of SLOTS)if(w.picks[sl])S.overrides[sl]=w.picks[sl].num;S.expanded={};renderAll();if(w&&w.team){S.team=w.team;renderRec()}}
+  if(b.dataset.share){const w=S.weeks.get(b.dataset.share);if(w){const picks={};for(const sl of SLOTS)picks[sl]=weekNums(w,sl);shareSongs(parseISO(w.date),picks,w.team,b)}return}
+  if(b.dataset.open){showTab('rec');S.date=parseISO(b.dataset.open);const w=S.weeks.get(b.dataset.open);S.overrides={};S.chosen={};if(w&&w.picks)for(const sl of SLOTS){const ns=weekNums(w,sl);if(ns.length)S.overrides[sl]=ns;if(DOUBLE_OK.includes(sl))S.double[sl]=ns.length>1}S.expanded={};renderAll();if(w&&w.team){S.team=w.team;renderRec()}}
   else if(b.dataset.delweek){const w=S.weeks.get(b.dataset.delweek);
     if(!await askConfirm('정말 지우시겠습니까?',`${w?w.label+' ('+w.date+')':b.dataset.delweek} 기록을 지워요. 모든 선생님 화면에서 사라지고 되돌릴 수 없어요.`))return;
     try{await S.db.collection('weeks').doc(b.dataset.delweek).delete()}catch(err){alertStatus(writeErr(err))}}};
@@ -520,7 +536,9 @@ function shareText(dt,picks,team){
   const lines=['[중고등부 주일 성가]',`${y}년 ${m}월 ${d}일 ${L.name} (${L.cycle}해)`];
   if(r&&r.go)lines.push('복음 '+r.go);
   lines.push('');
-  for(const sl of SLOTS){const n=picks[sl];const so=n&&S.songs.get(n);lines.push(`${sl}  ${so?so.num+' '+so.title:'-'}`)}
+  for(const sl of SLOTS){const ns=(picks[sl]||[]).filter(n=>S.songs.has(n));
+    if(!ns.length){lines.push(`${sl}  -`);continue}
+    ns.forEach((n,i)=>{const so=S.songs.get(n);lines.push(`${i?'        ':sl+'  '}${so.num} ${so.title}`)})}
   if(team)lines.push('',`반주: ${team}팀`);
   if(/^https?:/.test(location.href)&&!/claude\.ai|claudeusercontent/.test(location.href))lines.push('',location.href.split('#')[0]);
   return lines.join('\n');
