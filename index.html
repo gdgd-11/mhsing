@@ -132,9 +132,15 @@ td.n{font-family:var(--f-num);font-variant-numeric:tabular-nums;color:var(--lit)
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px 14px}
 .fld{display:flex;flex-direction:column;gap:4px;min-width:0}
 .checks{display:flex;flex-wrap:wrap;gap:6px}
-.checks label{display:inline-flex;gap:5px;align-items:center;font-size:13.5px;border:1px solid var(--line);border-radius:6px;padding:4px 9px;cursor:pointer}
+.checks label{white-space:nowrap;flex:none;display:inline-flex;gap:5px;align-items:center;font-size:13.5px;border:1px solid var(--line);border-radius:6px;padding:4px 9px;cursor:pointer}
 .sheetbar{display:flex;flex-direction:column;gap:8px}
 .sheetbar input{border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:8px 10px;min-width:0;flex:1}
+.modal{position:fixed;inset:0;background:rgba(10,14,12,.5);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50}
+.modal-box{background:var(--surface);color:var(--ink);border-radius:12px;padding:22px 20px 16px;width:100%;max-width:340px;display:flex;flex-direction:column;gap:10px;box-shadow:0 10px 40px rgba(0,0,0,.25)}
+.modal-box h3{font-family:var(--f-display);font-size:19px}
+.modal-box p{margin:0;color:var(--muted);font-size:14px;line-height:1.5}
+.modal-box .actions{justify-content:flex-end;margin-top:6px}
+.btn.danger-fill{background:var(--lit-red);border-color:var(--lit-red);color:var(--surface)}
 .notice{font-size:13px;color:var(--muted);background:var(--soft);border-radius:8px;padding:10px 12px;margin:0}
 @media (prefers-reduced-motion:no-preference){.slot,.hcard{transition:border-color .15s}}
 </style>
@@ -162,6 +168,10 @@ td.n{font-family:var(--f-num);font-variant-numeric:tabular-nums;color:var(--lit)
   </nav>
 
   <p class="notice" id="dbNotice" hidden></p>
+  <div class="modal" id="modal" hidden role="dialog" aria-modal="true" aria-labelledby="modalTitle" aria-describedby="modalMsg">
+    <div class="modal-box"><h3 id="modalTitle"></h3><p id="modalMsg"></p>
+      <div class="actions"><button class="btn" type="button" id="modalNo">취소</button><button class="btn danger-fill" type="button" id="modalYes">지우기</button></div></div>
+  </div>
   <form class="notice sheetbar" id="keyBar" hidden>
     <label for="keyInput">편집 암호를 넣으면 확정과 수정을 할 수 있어요. 한 번 넣으면 이 기기에 기억돼요.</label>
     <div class="actions"><input id="keyInput" type="password" autocomplete="off" placeholder="편집 암호"><button class="btn primary" type="submit">확인</button><button class="btn" type="button" id="keyLater">나중에</button><span class="status" id="keyStatus" role="status"></span></div>
@@ -415,7 +425,7 @@ function renderHist(){
   const host=$('hist'); const ws=[...S.weeks.values()].sort((a,b)=>b.date.localeCompare(a.date));
   if(!ws.length){host.innerHTML='<div class="empty">아직 확정한 주일이 없어요. 추천 화면에서 <b>이번 주 성가로 확정</b>을 누르면 여기에 쌓이고, 다음 추천부터 최근에 부른 곡을 빼 줘요.</div>';return}
   host.innerHTML=ws.map(w=>`<div class="hcard"><div><h4>${esc(w.label||'')}</h4><div class="meta">${esc(w.date)} · ${esc(w.cycle||'')}해 · ${esc(w.team||'')}팀 반주</div></div>
-    <div class="actions"><button class="btn" data-share="${esc(w.date)}">공유</button>${S.canWrite?`<button class="btn" data-open="${esc(w.date)}">열기</button><button class="btn danger" data-delweek="${esc(w.date)}">${S.delWeek===w.date?'정말 지울까요?':'지우기'}</button>`:`<button class="btn" data-open="${esc(w.date)}">열기</button>`}</div>
+    <div class="actions"><button class="btn" data-share="${esc(w.date)}">공유</button>${S.canWrite?`<button class="btn" data-open="${esc(w.date)}">열기</button><button class="btn danger" data-delweek="${esc(w.date)}">지우기</button>`:`<button class="btn" data-open="${esc(w.date)}">열기</button>`}</div>
     <ol>${SLOTS.map(sl=>w.picks&&w.picks[sl]?`<li><b>${sl}</b><span class="num">${w.picks[sl].num}</span> ${esc(w.picks[sl].title)}</li>`:`<li><b>${sl}</b>—</li>`).join('')}</ol></div>`).join('');
 }
 
@@ -447,7 +457,7 @@ function renderEditor(){
    <div class="grid2">${TEAMS.map(t=>`<div class="fld"><label for="f-adj-${t}" class="lbl">${t}팀 보정</label>${sel('f-adj-'+t,(s.adj||{})[t]??0,av)}</div>`).join('')}</div>
    <div class="fld"><label for="f-kw" class="lbl">키워드 (쉼표로 구분)</label><input id="f-kw" type="text" value="${esc((s.keywords||[]).join(', '))}"></div>
    <div class="grid2"><div class="fld"><label for="f-verses" class="lbl">연결 성경 구절</label><input id="f-verses" type="text" value="${esc(s.verses||'')}" placeholder="예: 요한 15,1-8"></div><div class="fld"><label for="f-note" class="lbl">비고</label><input id="f-note" type="text" value="${esc(s.note||'')}"></div></div>
-   <div class="actions"><button class="btn primary" type="submit">저장</button><button class="btn" type="button" id="cancelEdit">닫기</button>${e.isNew?'':`<button class="btn danger" type="button" id="delSong">${S.delArm?'한 번 더 누르면 삭제':'이 곡 삭제'}</button>`}<span class="status" id="formStatus" role="status"></span></div></form>`;
+   <div class="actions"><button class="btn primary" type="submit">저장</button><button class="btn" type="button" id="cancelEdit">닫기</button>${e.isNew?'':`<button class="btn danger" type="button" id="delSong">이 곡 삭제</button>`}<span class="status" id="formStatus" role="status"></span></div></form>`;
   host.scrollIntoView({block:'nearest'});
 }
 
@@ -501,8 +511,9 @@ function writeErr(err){if(err&&err.code==='key')return '편집 암호를 먼저 
 $('hist').onclick=async e=>{const b=e.target.closest('button');if(!b)return;
   if(b.dataset.share){const w=S.weeks.get(b.dataset.share);if(w){const picks={};for(const sl of SLOTS)if(w.picks&&w.picks[sl])picks[sl]=w.picks[sl].num;shareSongs(parseISO(w.date),picks,w.team,b)}return}
   if(b.dataset.open){showTab('rec');S.date=parseISO(b.dataset.open);const w=S.weeks.get(b.dataset.open);S.overrides={};if(w&&w.picks)for(const sl of SLOTS)if(w.picks[sl])S.overrides[sl]=w.picks[sl].num;S.expanded={};renderAll();if(w&&w.team){S.team=w.team;renderRec()}}
-  else if(b.dataset.delweek){if(S.delWeek!==b.dataset.delweek){S.delWeek=b.dataset.delweek;renderHist();return}
-    S.delWeek=null;try{await S.db.collection('weeks').doc(b.dataset.delweek).delete()}catch(err){alertStatus(writeErr(err))}}};
+  else if(b.dataset.delweek){const w=S.weeks.get(b.dataset.delweek);
+    if(!await askConfirm('정말 지우시겠습니까?',`${w?w.label+' ('+w.date+')':b.dataset.delweek} 기록을 지워요. 모든 선생님 화면에서 사라지고 되돌릴 수 없어요.`))return;
+    try{await S.db.collection('weeks').doc(b.dataset.delweek).delete()}catch(err){alertStatus(writeErr(err))}}};
 function shareText(dt,picks,team){
   const L=liturgy(dt); const y=dt.getUTCFullYear(),m=dt.getUTCMonth()+1,d=dt.getUTCDate();
   const r=S.readings.get(iso(dt));
@@ -523,6 +534,16 @@ async function shareSongs(dt,picks,team,btn){
     ta.readOnly=true;$('recStatus').replaceChildren(document.createTextNode('아래 내용을 길게 눌러 복사해 주세요.'),ta);ta.select()}
 }
 $('share').onclick=e=>shareSongs(S.date,S.picks,S.team,e.currentTarget);
+function askConfirm(title,msg,ok='지우기'){
+  return new Promise(res=>{
+    const m=$('modal'),yes=$('modalYes'),no=$('modalNo'),prev=document.activeElement;
+    $('modalTitle').textContent=title;$('modalMsg').textContent=msg;yes.textContent=ok;m.hidden=false;no.focus();
+    const done=v=>{m.hidden=true;yes.onclick=no.onclick=m.onclick=null;document.removeEventListener('keydown',key);if(prev&&prev.focus)prev.focus();res(v)};
+    const key=e=>{if(e.key==='Escape')done(false)};
+    yes.onclick=()=>done(true);no.onclick=()=>done(false);m.onclick=e=>{if(e.target===m)done(false)};
+    document.addEventListener('keydown',key);
+  });
+}
 function alertStatus(t){$('recStatus').textContent=t}
 
 $('songSearch').oninput=()=>renderSongs();
@@ -530,7 +551,8 @@ $('addSong').onclick=()=>{S.editing={isNew:true,song:{seasons:['연중'],slots:[
 $('songRows').onclick=e=>{if(!S.canWrite)return;const tr=e.target.closest('tr');if(!tr)return;const s=S.songs.get(+tr.dataset.edit);if(s){S.editing={isNew:false,orig:s.num,song:JSON.parse(JSON.stringify(s))};S.delArm=false;renderEditor()}};
 $('editorHost').addEventListener('click',async e=>{
   if(e.target.id==='cancelEdit'){S.editing=null;renderEditor()}
-  if(e.target.id==='delSong'){if(!S.delArm){S.delArm=true;e.target.textContent='한 번 더 누르면 삭제';return}
+  if(e.target.id==='delSong'){const so=S.songs.get(S.editing.orig);
+    if(!await askConfirm('정말 지우시겠습니까?',`${S.editing.orig}번 ${so?so.title:''}을(를) 성가 목록에서 지워요. 다시 넣으려면 성가 추가로 새로 등록해야 해요.`))return;
     try{await S.db.collection('songs').doc(String(S.editing.orig)).delete();S.editing=null;renderEditor()}catch(err){$('formStatus').textContent=writeErr(err)}}
 });
 $('editorHost').addEventListener('submit',async e=>{e.preventDefault();
